@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/techpulse-banner.png" alt="TechPulse Daily" width="800">
+  <img src="assets/techpulse-banner.svg" alt="TechPulse Daily" width="800">
 </p>
 
 <h1 align="center">📡 TechPulse Daily</h1>
@@ -307,7 +307,7 @@ techpulse-daily/
 ├── requirements.txt    # Python dependencies
 ├── SKILL.md            # OpenClaw skill definition
 ├── assets/
-│   └── techpulse-banner.png
+│   └── techpulse-banner.svg
 ├── techpulse_daily_output.md    # Generated briefing (gitignored)
 ├── techpulse_daily_data.json    # Generated JSON (gitignored)
 └── README.md
