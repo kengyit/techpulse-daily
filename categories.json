@@ -1,0 +1,120 @@
+{
+  "_README": "Edit this file to add/remove/modify news categories. Each category needs: emoji, min_stories, keywords (for classification), feeds (RSS URLs), and source_authority (scoring weight per source).",
+
+  "categories": {
+    "AI": {
+      "emoji": "🤖",
+      "min_stories": 3,
+      "keywords": [
+        "artificial intelligence", "machine learning", "deep learning", "llm",
+        "large language model", "gpt", "claude", "gemini", "mistral", "llama",
+        "transformer", "neural network", "reinforcement learning", "computer vision",
+        "nlp", "fine-tuning", "rag", "agent", "chatbot", "robotics", "openai",
+        "anthropic", "deepmind", "hugging face", "diffusion", "foundation model"
+      ],
+      "feeds": {
+        "MIT Tech Review": "https://www.technologyreview.com/feed/",
+        "Hugging Face Blog": "https://huggingface.co/blog/feed.xml",
+        "Anthropic News": "https://www.anthropic.com/rss.xml",
+        "OpenAI Blog": "https://openai.com/blog/rss.xml"
+      },
+      "source_authority": {
+        "MIT Tech Review": 9,
+        "Hugging Face Blog": 5,
+        "Anthropic News": 5,
+        "OpenAI Blog": 5
+      }
+    },
+    "IT": {
+      "emoji": "💻",
+      "min_stories": 3,
+      "keywords": [
+        "kubernetes", "docker", "cloud", "aws", "azure", "gcp", "linux",
+        "cybersecurity", "zero-day", "vulnerability", "ransomware", "devops",
+        "api", "database", "postgresql", "redis", "microservices", "saas",
+        "open source", "github", "rust", "golang", "typescript", "python",
+        "infrastructure", "networking", "firewall", "cve", "patch"
+      ],
+      "feeds": {
+        "Hacker News": "https://hnrss.org/best?count=30",
+        "Ars Technica": "https://feeds.arstechnica.com/arstechnica/index",
+        "TechCrunch": "https://techcrunch.com/feed/",
+        "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
+        "The Register": "https://www.theregister.com/headlines.atom"
+      },
+      "source_authority": {
+        "Hacker News": 7,
+        "Ars Technica": 8,
+        "TechCrunch": 7,
+        "BleepingComputer": 7,
+        "The Register": 6
+      }
+    },
+    "Quantum": {
+      "emoji": "⚛️",
+      "min_stories": 2,
+      "keywords": [
+        "quantum", "qubit", "superconducting", "entanglement", "superposition",
+        "quantum computing", "quantum advantage", "error correction", "ibm quantum",
+        "google quantum", "ionq", "rigetti", "photonic", "particle physics",
+        "cern", "higgs", "dark matter", "gravitational wave", "fusion"
+      ],
+      "feeds": {
+        "Quanta Magazine": "https://www.quantamagazine.org/feed/",
+        "Phys.org Quantum": "https://phys.org/rss-feed/topic/quantum-physics/"
+      },
+      "source_authority": {
+        "Quanta Magazine": 10,
+        "Phys.org Quantum": 5
+      }
+    },
+    "Biology": {
+      "emoji": "🧬",
+      "min_stories": 2,
+      "keywords": [
+        "crispr", "gene therapy", "genomics", "mrna", "protein folding",
+        "alphafold", "drug discovery", "clinical trial", "fda", "biotech",
+        "synthetic biology", "neuroscience", "stem cell", "immunotherapy",
+        "cancer", "vaccine", "microbiome", "dna", "rna", "sequencing"
+      ],
+      "feeds": {
+        "Nature News": "https://www.nature.com/nature.rss",
+        "STAT News": "https://www.statnews.com/feed/"
+      },
+      "source_authority": {
+        "Nature News": 10,
+        "STAT News": 9
+      }
+    },
+    "Emerging": {
+      "emoji": "🚀",
+      "min_stories": 2,
+      "keywords": [
+        "semiconductor", "chip", "tsmc", "nanometer", "lithography", "battery",
+        "solid state", "solar", "hydrogen", "fusion energy", "space", "nasa",
+        "spacex", "mars", "satellite", "climate", "carbon capture",
+        "materials science", "superconductor", "graphene", "3d printing"
+      ],
+      "feeds": {
+        "IEEE Spectrum": "https://spectrum.ieee.org/feeds/feed.rss",
+        "Science Daily": "https://www.sciencedaily.com/rss/all.xml",
+        "SpaceNews": "https://spacenews.com/feed/"
+      },
+      "source_authority": {
+        "IEEE Spectrum": 9,
+        "Science Daily": 6,
+        "SpaceNews": 6
+      }
+    }
+  },
+
+  "settings": {
+    "total_stories": 15,
+    "flex_slots": 3,
+    "recency_hours": 36,
+    "dedup_threshold": 0.80,
+    "feed_timeout_seconds": 20,
+    "max_workers": 10,
+    "llm_timeout_seconds": 90
+  }
+}
