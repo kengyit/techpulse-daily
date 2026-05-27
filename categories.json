@@ -115,6 +115,15 @@
     "dedup_threshold": 0.80,
     "feed_timeout_seconds": 20,
     "max_workers": 10,
-    "llm_timeout_seconds": 90
+
+    "llm_provider": "ollama",
+    "llm_model": "llama3.1:8b",
+    "llm_url": "http://127.0.0.1:11434/api/generate",
+    "llm_max_tokens": 512,
+    "llm_retries": 3,
+    "llm_timeout_seconds": 90,
+
+    "schedule_time": "06:30",
+    "run_idea_radar": false
   }
 }

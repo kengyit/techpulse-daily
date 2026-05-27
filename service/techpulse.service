@@ -1,0 +1,12 @@
+[Unit]
+Description=TechPulse Daily — generate the daily tech & science briefing
+Documentation=https://github.com/moltgoldfallen-droid/techpulse-daily
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__APP_DIR__
+ExecStart=__PYTHON__ __APP_DIR__/app.py once
+# Load TECHPULSE_* / TELEGRAM_* vars if a .env file is present (optional).
+EnvironmentFile=-__APP_DIR__/.env

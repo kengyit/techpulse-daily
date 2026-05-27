@@ -201,6 +201,7 @@ BREAKTHROUGH · Source
 git clone https://github.com/moltgoldfallen-droid/techpulse-daily.git
 cd techpulse-daily
 pip install -r requirements.txt
+cp .env.example .env        # optional — edit model, schedule, Telegram, etc.
 
 # Test without LLM (uses raw RSS summaries)
 python run.py --no-llm
@@ -208,27 +209,57 @@ python run.py --no-llm
 # Full run with LLM summarization
 python run.py
 
-# Full run + Telegram delivery + JSON export
-export TELEGRAM_BOT_TOKEN="your_token"
-export TELEGRAM_CHAT_ID="your_chat_id"
-python run.py --telegram --json
+# Run via the local application (same pipeline, reads .env / categories.json)
+python app.py once          # one-shot
+python app.py serve         # built-in daily scheduler (Ctrl-C to stop)
 ```
 
 ### Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `TECHPULSE_MODEL` | No | `minimax-m2.5:cloud` | Ollama model name |
-| `TECHPULSE_OLLAMA_URL` | No | `http://127.0.0.1:11434/api/generate` | LLM API endpoint |
-| `TELEGRAM_BOT_TOKEN` | For Telegram | — | Telegram Bot API token |
-| `TELEGRAM_CHAT_ID` | For Telegram | — | Target chat/channel ID |
+All are optional — env vars override the matching keys in `categories.json` → `settings`. See `.env.example`.
 
-### Cron Setup (Daily Automation)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TECHPULSE_LLM_PROVIDER` | `ollama` | `ollama` \| `ollama-chat` \| `openai` |
+| `TECHPULSE_MODEL` | `llama3.1:8b` | Model name (any local Ollama model, or hosted model) |
+| `TECHPULSE_LLM_URL` | `http://127.0.0.1:11434/api/generate` | LLM endpoint |
+| `TECHPULSE_LLM_API_KEY` | — | Bearer token for OpenAI-compatible endpoints |
+| `TECHPULSE_LLM_MAX_TOKENS` | `512` | Output token cap (raised from the old 200 to stop truncation) |
+| `TECHPULSE_LLM_RETRIES` | `3` | Retry attempts (exponential backoff) per LLM call |
+| `TECHPULSE_LLM_TIMEOUT` | `90` | Per-call timeout (seconds) |
+| `TECHPULSE_SCHEDULE` | `06:30` | Daily run time for `app.py serve` / installed service |
+| `TECHPULSE_JSON` | `1` | Also write `techpulse_daily_data.json` |
+| `TECHPULSE_RUN_IDEA_RADAR` | `0` | Run `idea_radar.py` after each briefing |
+| `TECHPULSE_TELEGRAM` | `0` | Deliver via Telegram |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram Bot API token (for Telegram delivery) |
+| `TELEGRAM_CHAT_ID` | — | Target chat/channel ID |
+
+### Local Application & Scheduling (Daily Automation)
+
+This runs as a **self-contained local application** — no external scheduler or agent runtime required. Pick whichever fits your machine:
+
+**Built-in scheduler (cross-platform, no setup):**
+
+```bash
+python app.py serve          # stays running, fires daily at TECHPULSE_SCHEDULE
+```
+
+**OS service (survives logout/reboot) — one command installs a user-level service:**
+
+```bash
+./install.sh            # auto: systemd timer on Linux, launchd agent on macOS
+./install.sh daemon     # Linux: systemd service running the built-in `app.py serve`
+./install.sh --uninstall
+```
+
+The installer fills in absolute paths and the schedule time, then enables the service. On Linux it installs a user-level systemd timer (run `loginctl enable-linger $USER` to keep it running while logged out); on macOS it installs a launchd agent.
+
+**System cron (if you prefer your own crontab):**
 
 ```bash
 crontab -e
-# Add:
-30 6 * * * cd /path/to/techpulse-daily && /usr/bin/python3 run.py --telegram --json >> techpulse.log 2>&1
+# Add — cron.sh sources .env and runs the local app once:
+30 6 * * * /path/to/techpulse-daily/cron.sh
 ```
 
 ---
@@ -263,16 +294,23 @@ Delete the category block from `categories.json`. The pipeline auto-adjusts.
 
 ### Using a Different LLM
 
+The LLM layer (`llm.py`) is fully configurable and resilient — every call retries with backoff and is validated as non-empty, so a flaky endpoint falls back to raw summaries instead of producing truncated/garbled output.
+
 ```bash
+# Local Ollama (default) — any pulled model
+export TECHPULSE_MODEL="mistral"
+
 # OpenAI-compatible endpoint
-export TECHPULSE_MODEL="gpt-4"
-export TECHPULSE_OLLAMA_URL="https://api.openai.com/v1/completions"
+export TECHPULSE_LLM_PROVIDER="openai"
+export TECHPULSE_LLM_URL="https://api.openai.com/v1/chat/completions"
+export TECHPULSE_MODEL="gpt-4o-mini"
+export TECHPULSE_LLM_API_KEY="sk-..."
 
-# Local Ollama with different model
-export TECHPULSE_MODEL="llama3:8b"
-
-# Any model works — the ABT prompt is model-agnostic
+# Ollama chat API instead of generate
+export TECHPULSE_LLM_URL="http://127.0.0.1:11434/api/chat"
 ```
+
+Any model works — the ABT prompt is model-agnostic. Defaults live in `categories.json` → `settings`; env vars override them.
 
 ### Custom Config File
 
@@ -292,7 +330,7 @@ python run.py --json
 python idea_radar.py --json
 ```
 
-It dynamically discovers projects by scanning directories for `SKILL.md` files, extracts tech stacks and known gaps, then uses the LLM to find concrete integration matches (specific libraries, APIs, or tools — not vague thematic overlaps).
+It dynamically discovers projects by scanning directories for `SKILL.md` files, extracts tech stacks and known gaps, then uses the LLM to find concrete integration matches (specific libraries, APIs, or tools — not vague thematic overlaps). Point it at your own project directories with `TECHPULSE_PROJECT_PATHS` (os-path-separator delimited); enable it in the scheduled run with `TECHPULSE_RUN_IDEA_RADAR=1`.
 
 ---
 
@@ -301,11 +339,14 @@ It dynamically discovers projects by scanning directories for `SKILL.md` files, 
 ```
 techpulse-daily/
 ├── run.py              # Main pipeline (8 stages)
+├── app.py              # Local application: one-shot + built-in daily scheduler
+├── llm.py              # Configurable, resilient LLM client (Ollama / OpenAI-compatible)
 ├── idea_radar.py       # Integration idea matcher (optional)
-├── categories.json     # User-editable category config
-├── cron.sh             # Cron runner script
+├── categories.json     # User-editable category + LLM + schedule config
+├── install.sh          # Installs a systemd timer (Linux) / launchd agent (macOS)
+├── service/            # Service templates (systemd .service/.timer, launchd .plist)
+├── cron.sh             # Optional system-cron wrapper around app.py
 ├── requirements.txt    # Python dependencies
-├── SKILL.md            # OpenClaw skill definition
 ├── assets/
 │   └── techpulse-banner.svg
 ├── techpulse_daily_output.md    # Generated briefing (gitignored)
@@ -326,6 +367,8 @@ techpulse-daily/
 | External `categories.json` | Separation of concerns — domain knowledge lives outside code; non-developers can customize |
 | Multi-channel output | stdout for piping, .md for reading, .json for APIs, Telegram for mobile — same pipeline, four outputs |
 | Impact tag specificity ordering | Checks BREAKTHROUGH before RELEASE prevents a "breakthrough release" from being tagged as mere RELEASE |
+| Self-contained local app (`app.py`) | Built-in scheduler + OS-service installer replace the unreliable external cron/agent runner; the pipeline runs entirely on the local machine |
+| Resilient LLM client (`llm.py`) | Retries with backoff, a generous token cap, and empty-response validation eliminate the truncated/unstable summaries; one client targets local Ollama or any OpenAI-compatible endpoint |
 
 ---
 

@@ -41,12 +41,12 @@ except ImportError:
     sys.stderr.write("ERROR: feedparser not installed. Run: pip install feedparser\n")
     sys.exit(1)
 
+import llm
+
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
 
-OLLAMA_MODEL = os.environ.get("TECHPULSE_MODEL", "minimax-m2.5:cloud")
-OLLAMA_URL = os.environ.get("TECHPULSE_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -113,7 +113,7 @@ def load_config(config_path: Path) -> dict:
         "dedup_threshold": settings.get("dedup_threshold", 0.80),
         "feed_timeout": settings.get("feed_timeout_seconds", 20),
         "max_workers": settings.get("max_workers", 10),
-        "llm_timeout": settings.get("llm_timeout_seconds", 90),
+        "llm_config": llm.LLMConfig.from_settings(settings),
     }
 
 
@@ -387,68 +387,27 @@ Original: {content}
 Your rewrite:"""
 
 
-def call_ollama(prompt: str, system: str = "", config: dict = None) -> str:
-    """Call local Ollama with system + user prompt."""
-    timeout = (config or {}).get("llm_timeout", 90)
-
-    # Build prompt with system instruction embedded (works across all models)
-    full_prompt = f"""<|system|>
-{system}
-<|end|>
-<|user|>
-{prompt}
-<|end|>
-<|assistant|>
-"""
-    # Fallback: if model doesn't support chat template, concatenate
-    # Most models handle this fine. For pure completion models, we
-    # just prepend the system prompt.
-    simple_prompt = f"{system}\n\n---\n\n{prompt}"
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": simple_prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.3,
-            "num_predict": 200,
-            "top_p": 0.9,
-        },
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        OLLAMA_URL, data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            text = result.get("response", "").strip()
-            # Clean up common model artifacts
-            text = re.sub(r"^(AND|BUT|THEREFORE|Summary|Rewrite|Here)[:\s]*", "", text, flags=re.I)
-            text = re.sub(r"\*\*.*?\*\*", "", text)  # Remove markdown bold
-            text = re.sub(r"^[-•]\s*", "", text, flags=re.M)  # Remove bullets
-            text = re.sub(r"\n+", " ", text)  # Flatten to single paragraph
-            text = re.sub(r"\s+", " ", text).strip()
-            return text
-    except Exception as exc:
-        sys.stderr.write(f"  [LLM Error] {exc}\n")
-        return ""
+def _sanitize_summary(text: str) -> str:
+    """Strip model artifacts and flatten to a single ABT paragraph."""
+    text = re.sub(r"^(AND|BUT|THEREFORE|Summary|Rewrite|Here)[:\s]*", "", text, flags=re.I)
+    text = re.sub(r"\*\*.*?\*\*", "", text)  # Remove markdown bold
+    text = re.sub(r"^[-•]\s*", "", text, flags=re.M)  # Remove bullets
+    text = re.sub(r"\n+", " ", text)  # Flatten to single paragraph
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def summarize_article_abt(article: dict, config: dict) -> str:
     """Generate ABT-style summary via LLM, with fallbacks."""
     raw = article.get("raw_summary", "")
 
-    # Try LLM first
+    # Try LLM first (retries + backoff handled by the client)
     prompt = ABT_USER_TEMPLATE.format(
         title=article["title"],
         content=raw[:500],
     )
-    result = call_ollama(prompt, system=ABT_SYSTEM_PROMPT, config=config)
+    result = _sanitize_summary(config["llm_config"].complete(ABT_SYSTEM_PROMPT, prompt))
 
-    # Validate: must be 30+ chars, 2+ sentences
+    # Validate: must be 50+ chars, 2+ sentences
     if result and len(result) > 50 and result.count(".") >= 2:
         return result[:500]
 
@@ -547,7 +506,7 @@ def format_briefing(articles: List[dict], stats: dict, config: dict) -> str:
     lines.append(f"📊 Sources: {stats.get('feeds_ok', 0)}/{stats.get('feeds_total', 0)} feeds")
     lines.append(f"📰 Evaluated: {stats.get('total_candidates', 0)} → Selected: {stats.get('selected', 0)}")
     lines.append(f"⏱ Pipeline: {stats.get('elapsed_sec', 0):.1f}s")
-    lines.append(f"🧠 Model: {OLLAMA_MODEL}")
+    lines.append(f"🧠 Model: {config['llm_config'].describe()}")
     lines.append(f"📖 Storytelling: ABT (And-But-Therefore) + Analogy Bridging")
 
     return "\n".join(lines)
@@ -609,7 +568,7 @@ def save_json(articles: List[dict], stats: dict, config: dict):
     """Save structured data for downstream consumers."""
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model": OLLAMA_MODEL,
+        "model": config["llm_config"].describe(),
         "storytelling_framework": "ABT (And-But-Therefore) + Analogy Bridging",
         "categories": list(config["domain_keywords"].keys()),
         "stats": stats,
@@ -636,22 +595,23 @@ def save_json(articles: List[dict], stats: dict, config: dict):
 # MAIN
 # ─────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="TechPulse Daily — Tech & Science News Briefing")
-    parser.add_argument("--no-llm", action="store_true", help="Skip LLM, use raw RSS summaries")
-    parser.add_argument("--telegram", action="store_true", help="Send to Telegram")
-    parser.add_argument("--json", action="store_true", help="Output structured JSON")
-    parser.add_argument("--config", type=str, default=str(DEFAULT_CONFIG), help="Path to categories.json")
-    args = parser.parse_args()
+def run_pipeline(
+    config_path: Path | str = DEFAULT_CONFIG,
+    use_llm: bool = True,
+    telegram: bool = False,
+    json_out: bool = False,
+) -> tuple[str, dict]:
+    """Run the full briefing pipeline once and return ``(briefing, stats)``.
 
-    # Load config
-    config_path = Path(args.config)
-    config = load_config(config_path)
+    This is the single entry point shared by the CLI (``main``) and the local
+    application/scheduler (``app.py``), so both paths behave identically.
+    """
+    config = load_config(Path(config_path))
 
     t0 = time.time()
     cat_names = list(config["domain_keywords"].keys())
-    sys.stderr.write(f"\n🦞 TechPulse Daily — Starting pipeline\n")
-    sys.stderr.write(f"   Model: {OLLAMA_MODEL}\n")
+    sys.stderr.write(f"\n📡 TechPulse Daily — Starting pipeline\n")
+    sys.stderr.write(f"   Model: {config['llm_config'].describe()}\n")
     sys.stderr.write(f"   Categories: {', '.join(cat_names)}\n")
     sys.stderr.write(f"   Config: {config_path}\n")
     sys.stderr.write(f"   Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
@@ -660,8 +620,7 @@ def main():
     raw_articles = ingest_all_feeds(config)
     feeds_ok = len(set(a["source"] for a in raw_articles))
     if not raw_articles:
-        sys.stderr.write("FATAL: No articles ingested. Check network.\n")
-        sys.exit(1)
+        raise RuntimeError("No articles ingested. Check network and feed URLs.")
 
     # Step 2: Normalize & Dedup
     articles = normalize_and_dedup(raw_articles, config)
@@ -677,7 +636,7 @@ def main():
     selected = select_top(articles, config)
 
     # Step 6: Summarize
-    selected = summarize_all(selected, use_llm=not args.no_llm, config=config)
+    selected = summarize_all(selected, use_llm=use_llm, config=config)
 
     elapsed = time.time() - t0
     stats = {
@@ -695,19 +654,41 @@ def main():
     OUTPUT_MD.write_text(briefing, encoding="utf-8")
     sys.stderr.write(f"[Output] Markdown → {OUTPUT_MD}\n")
 
-    if args.json:
+    if json_out:
         save_json(selected, stats, config)
 
-    if args.telegram:
+    if telegram:
         sys.stderr.write("[Step 8] Sending to Telegram...\n")
         send_telegram(briefing)
-
-    print(briefing)
 
     sys.stderr.write(f"\n✅ Pipeline complete in {elapsed:.1f}s\n")
     sys.stderr.write(f"   {feeds_ok}/{len(config['feeds'])} feeds responded\n")
     sys.stderr.write(f"   {total_candidates} candidates → {len(selected)} selected\n")
     sys.stderr.write(f"   Categories: {', '.join(cat_names)}\n\n")
+
+    return briefing, stats
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TechPulse Daily — Tech & Science News Briefing")
+    parser.add_argument("--no-llm", action="store_true", help="Skip LLM, use raw RSS summaries")
+    parser.add_argument("--telegram", action="store_true", help="Send to Telegram")
+    parser.add_argument("--json", action="store_true", help="Output structured JSON")
+    parser.add_argument("--config", type=str, default=str(DEFAULT_CONFIG), help="Path to categories.json")
+    args = parser.parse_args()
+
+    try:
+        briefing, _ = run_pipeline(
+            config_path=args.config,
+            use_llm=not args.no_llm,
+            telegram=args.telegram,
+            json_out=args.json,
+        )
+    except RuntimeError as exc:
+        sys.stderr.write(f"FATAL: {exc}\n")
+        sys.exit(1)
+
+    print(briefing)
 
 
 if __name__ == "__main__":

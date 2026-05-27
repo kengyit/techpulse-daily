@@ -1,0 +1,16 @@
+[Unit]
+Description=TechPulse Daily — built-in scheduler daemon (app.py serve)
+Documentation=https://github.com/moltgoldfallen-droid/techpulse-daily
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+ExecStart=__PYTHON__ __APP_DIR__/app.py serve
+EnvironmentFile=-__APP_DIR__/.env
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

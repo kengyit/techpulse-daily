@@ -1,0 +1,12 @@
+[Unit]
+Description=Run TechPulse Daily every morning
+Documentation=https://github.com/moltgoldfallen-droid/techpulse-daily
+
+[Timer]
+# OnCalendar is set to the configured daily time by install.sh.
+OnCalendar=__ON_CALENDAR__
+# Catch up if the machine was asleep/off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
