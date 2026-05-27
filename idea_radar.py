@@ -24,27 +24,19 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
-import urllib.request
+
+import llm
 
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
 
-OLLAMA_MODEL = os.environ.get("TECHPULSE_MODEL", "minimax-m2.5:cloud")
-OLLAMA_URL = os.environ.get("TECHPULSE_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
-
-BRIEFING_MD = Path(__file__).parent.parent / "techpulse-daily" / "techpulse_daily_output.md"
-BRIEFING_JSON = Path(__file__).parent.parent / "techpulse-daily" / "techpulse_daily_data.json"
-OUTPUT_PATH = Path(__file__).with_name("idea_radar_output.md")
+SCRIPT_DIR = Path(__file__).parent
+BRIEFING_MD = SCRIPT_DIR / "techpulse_daily_output.md"
+BRIEFING_JSON = SCRIPT_DIR / "techpulse_daily_data.json"
+OUTPUT_PATH = SCRIPT_DIR / "idea_radar_output.md"
 
 MAX_IDEAS = 3
-LLM_TIMEOUT = 90
-
-SKILL_DISCOVERY_PATHS = [
-    Path.home() / "openclaw-projects" / "skills",
-    Path.home() / ".openclaw" / "workspace" / "skills",
-    Path.home() / ".openclaw" / "skills",
-]
 
 SKIP_PROJECTS = {
     "techpulse-daily",
@@ -52,29 +44,21 @@ SKIP_PROJECTS = {
 }
 
 
-# ─────────────────────────────────────────────
-# OLLAMA
-# ─────────────────────────────────────────────
+def discovery_paths() -> List[Path]:
+    """Directories to scan for project SKILL.md files.
 
-def call_ollama(prompt: str) -> str:
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.3, "num_predict": 200},
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        OLLAMA_URL, data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("response", "").strip()
-    except Exception as exc:
-        return f"[LLM error: {exc}]"
+    Override with the ``TECHPULSE_PROJECT_PATHS`` env var (os.pathsep-separated).
+    Defaults stay backward-compatible with the old OpenClaw layout so existing
+    installs keep working without the OpenClaw runtime.
+    """
+    override = os.environ.get("TECHPULSE_PROJECT_PATHS", "")
+    if override.strip():
+        return [Path(p).expanduser() for p in override.split(os.pathsep) if p.strip()]
+    return [
+        Path.home() / "openclaw-projects" / "skills",
+        Path.home() / ".openclaw" / "workspace" / "skills",
+        Path.home() / ".openclaw" / "skills",
+    ]
 
 
 # ─────────────────────────────────────────────
@@ -84,7 +68,7 @@ def call_ollama(prompt: str) -> str:
 def discover_projects() -> Dict[str, dict]:
     """Scan known paths for SKILL.md files and extract project metadata."""
     projects: Dict[str, dict] = {}
-    for base in SKILL_DISCOVERY_PATHS:
+    for base in discovery_paths():
         if not base.exists():
             continue
         for skill_dir in base.iterdir():
@@ -220,7 +204,7 @@ def keyword_prefilter(story: dict, projects: Dict[str, dict]) -> bool:
     return False
 
 
-def evaluate_story(story: dict, project_context: str, valid_targets: set) -> Optional[dict]:
+def evaluate_story(story: dict, project_context: str, valid_targets: set, client: "llm.LLMConfig") -> Optional[dict]:
     """Use LLM to evaluate a single story for integration opportunities."""
     prompt = textwrap.dedent(f"""
         You are a pragmatic software architect. Given a news story and a list of
@@ -251,8 +235,8 @@ def evaluate_story(story: dict, project_context: str, valid_targets: set) -> Opt
         ACTION: <pip install X / curl Y / etc>
     """).strip()
 
-    result = call_ollama(prompt)
-    if "SKIP" in result.upper()[:30]:
+    result = client.complete("", prompt)
+    if not result or "SKIP" in result.upper()[:30]:
         return None
 
     idea = {"source_title": story.get("title", ""), "source_url": story.get("url", "")}
@@ -312,24 +296,27 @@ def format_output(ideas: List[dict]) -> str:
 # MAIN
 # ─────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="TechPulse Idea Integration Radar")
-    parser.add_argument("--json", action="store_true", help="Read from JSON output instead of markdown")
-    parser.add_argument("--no-llm", action="store_true", help="Keyword-only matching, skip LLM")
-    args = parser.parse_args()
+def run_radar(use_llm: bool = True, from_json: bool = True) -> str:
+    """Match the latest briefing against discovered projects. Returns the report.
 
+    Shared entry point for the CLI (``main``) and the local app (``app.py``).
+    Raises ``RuntimeError`` when there are no projects or stories to work with.
+    """
+    client = llm.LLMConfig.from_settings(None)
     sys.stderr.write("\n🔧 Idea Integration Radar — Starting\n")
-    sys.stderr.write(f"   Model: {OLLAMA_MODEL}\n\n")
+    sys.stderr.write(f"   Model: {client.describe()}\n\n")
 
     # Discover projects
     projects = discover_projects()
     if not projects:
-        sys.stderr.write("[IdeaRadar] No active projects discovered.\n")
-        sys.exit(1)
+        raise RuntimeError(
+            "No projects discovered. Set TECHPULSE_PROJECT_PATHS to directories "
+            "containing SKILL.md files."
+        )
     sys.stderr.write(f"[IdeaRadar] Discovered {len(projects)} projects: {', '.join(projects.keys())}\n")
 
     # Parse stories
-    if args.json and BRIEFING_JSON.exists():
+    if from_json and BRIEFING_JSON.exists():
         stories = parse_from_json(BRIEFING_JSON)
         sys.stderr.write(f"[IdeaRadar] Parsed {len(stories)} stories from JSON\n")
     else:
@@ -337,8 +324,7 @@ def main():
         sys.stderr.write(f"[IdeaRadar] Parsed {len(stories)} stories from markdown\n")
 
     if not stories:
-        sys.stderr.write("[IdeaRadar] No stories found. Run techpulse-daily/run.py first.\n")
-        sys.exit(1)
+        raise RuntimeError("No stories found. Run the briefing pipeline (run.py / app.py) first.")
 
     # Evaluate
     project_context = build_project_context(projects)
@@ -353,7 +339,7 @@ def main():
         if not keyword_prefilter(story, projects):
             continue
 
-        if args.no_llm:
+        if not use_llm:
             # Basic keyword match only — report which project's keywords matched
             text = (story.get("title", "") + " " + story.get("summary", "")).lower()
             for pid, proj in projects.items():
@@ -372,7 +358,7 @@ def main():
                 if len(ideas) >= MAX_IDEAS:
                     break
         else:
-            idea = evaluate_story(story, project_context, valid_targets)
+            idea = evaluate_story(story, project_context, valid_targets, client)
             if idea:
                 ideas.append(idea)
 
@@ -381,6 +367,21 @@ def main():
     OUTPUT_PATH.write_text(output, encoding="utf-8")
     sys.stderr.write(f"[IdeaRadar] Output → {OUTPUT_PATH}\n")
     sys.stderr.write(f"[IdeaRadar] {len(ideas)} idea(s) found\n\n")
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TechPulse Idea Integration Radar")
+    parser.add_argument("--json", action="store_true", help="Read from JSON output instead of markdown")
+    parser.add_argument("--no-llm", action="store_true", help="Keyword-only matching, skip LLM")
+    args = parser.parse_args()
+
+    try:
+        output = run_radar(use_llm=not args.no_llm, from_json=args.json)
+    except RuntimeError as exc:
+        sys.stderr.write(f"[IdeaRadar] {exc}\n")
+        sys.exit(1)
+
     print(output)
 
 
