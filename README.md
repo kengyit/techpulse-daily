@@ -247,12 +247,21 @@ python app.py serve          # stays running, fires daily at TECHPULSE_SCHEDULE
 **OS service (survives logout/reboot) — one command installs a user-level service:**
 
 ```bash
-./install.sh            # auto: systemd timer on Linux, launchd agent on macOS
-./install.sh daemon     # Linux: systemd service running the built-in `app.py serve`
+./install.sh                # auto: systemd timer on Linux, launchd agent on macOS
+./install.sh daemon         # Linux: systemd service running the built-in `app.py serve`
+./install.sh launchd-daemon # macOS: keep-alive agent — starts at login/boot, restarts itself
 ./install.sh --uninstall
 ```
 
 The installer fills in absolute paths and the schedule time, then enables the service. On Linux it installs a user-level systemd timer (run `loginctl enable-linger $USER` to keep it running while logged out); on macOS it installs a launchd agent.
+
+**Always-on (e.g. a Mac mini) — start at boot and auto-restart:**
+
+```bash
+./install.sh launchd-daemon
+```
+
+This installs a keep-alive launchd agent (`com.techpulse.daemon`) that runs `app.py serve` with `RunAtLoad` + `KeepAlive`, so it starts whenever you log in / the machine boots and relaunches automatically if it ever exits. The built-in scheduler then handles the daily run internally. (A LaunchAgent starts at login; if the Mac mini auto-logs-in, that's effectively at boot. For a true pre-login start, install a LaunchDaemon in `/Library/LaunchDaemons` with sudo.)
 
 **System cron (if you prefer your own crontab):**
 

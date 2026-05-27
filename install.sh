@@ -3,10 +3,12 @@
 #
 # Replaces the old OpenClaw cron job. Installs user-level services (no sudo):
 #
-#   ./install.sh            # auto: systemd timer on Linux, launchd on macOS
-#   ./install.sh timer      # Linux: systemd timer fires `app.py once` daily
-#   ./install.sh daemon     # Linux: systemd service runs `app.py serve` (built-in scheduler)
-#   ./install.sh launchd    # macOS: launchd agent fires `app.py once` daily
+#   ./install.sh                # auto: systemd timer on Linux, launchd on macOS
+#   ./install.sh timer          # Linux: systemd timer fires `app.py once` daily
+#   ./install.sh daemon         # Linux: systemd service runs `app.py serve` (built-in scheduler)
+#   ./install.sh launchd        # macOS: launchd agent fires `app.py once` daily
+#   ./install.sh launchd-daemon # macOS: keep-alive agent runs `app.py serve` —
+#                               #        starts at login/boot and restarts itself
 #   ./install.sh --uninstall
 #
 # Schedule time comes from $TECHPULSE_SCHEDULE, else categories.json
@@ -64,10 +66,13 @@ fi
 uninstall() {
     case "${OS}" in
         Darwin)
-            local plist="${HOME}/Library/LaunchAgents/com.techpulse.daily.plist"
-            launchctl unload -w "${plist}" 2>/dev/null || true
-            rm -f "${plist}"
-            echo "Removed launchd agent."
+            local plist
+            for label in com.techpulse.daily com.techpulse.daemon; do
+                plist="${HOME}/Library/LaunchAgents/${label}.plist"
+                launchctl unload -w "${plist}" 2>/dev/null || true
+                rm -f "${plist}"
+            done
+            echo "Removed launchd agents."
             ;;
         *)
             systemctl --user disable --now techpulse.timer 2>/dev/null || true
@@ -122,8 +127,22 @@ case "${MODE}" in
         echo "  Status:  launchctl list | grep com.techpulse.daily"
         echo "  Run now: launchctl start com.techpulse.daily"
         ;;
+    launchd-daemon)
+        AGENT_DIR="${HOME}/Library/LaunchAgents"
+        PLIST="${AGENT_DIR}/com.techpulse.daemon.plist"
+        mkdir -p "${AGENT_DIR}"
+        render "${TEMPLATES}/com.techpulse.daemon.plist" "${PLIST}"
+        launchctl unload -w "${PLIST}" 2>/dev/null || true
+        launchctl load -w "${PLIST}"
+        echo "Installed launchd daemon — starts at login/boot, restarts itself, runs daily at ${SCHEDULE}."
+        echo "  Status: launchctl list | grep com.techpulse.daemon"
+        echo "  Logs:   tail -f ${APP_DIR}/techpulse.log"
+        echo "  Note: a LaunchAgent starts at login. If the Mac mini auto-logs-in, that's"
+        echo "        effectively at boot. For pre-login start, install a LaunchDaemon in"
+        echo "        /Library/LaunchDaemons (requires sudo)."
+        ;;
     *)
-        echo "ERROR: unknown mode '${MODE}'. Use: timer | daemon | launchd | --uninstall" >&2
+        echo "ERROR: unknown mode '${MODE}'. Use: timer | daemon | launchd | launchd-daemon | --uninstall" >&2
         exit 1
         ;;
 esac
