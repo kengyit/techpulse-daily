@@ -258,10 +258,18 @@ The installer fills in absolute paths and the schedule time, then enables the se
 **Always-on (e.g. a Mac mini) — start at boot and auto-restart:**
 
 ```bash
-./install.sh launchd-daemon
+./install.sh launchd-daemon          # LaunchAgent — starts at login, no sudo needed
+sudo ./install.sh launchd-system     # LaunchDaemon — starts at system boot, pre-login
 ```
 
-This installs a keep-alive launchd agent (`com.techpulse.daemon`) that runs `app.py serve` with `RunAtLoad` + `KeepAlive`, so it starts whenever you log in / the machine boots and relaunches automatically if it ever exits. The built-in scheduler then handles the daily run internally. (A LaunchAgent starts at login; if the Mac mini auto-logs-in, that's effectively at boot. For a true pre-login start, install a LaunchDaemon in `/Library/LaunchDaemons` with sudo.)
+Both install a keep-alive launchd job (`RunAtLoad` + `KeepAlive`) that runs `app.py serve`, so it comes up whenever the machine starts and relaunches automatically if it ever exits. The built-in scheduler handles the daily run internally. Pick the one that matches when you need it running:
+
+| Mode | Where | Starts at | Runs as | Sudo |
+|------|-------|-----------|---------|------|
+| `launchd-daemon` | `~/Library/LaunchAgents/com.techpulse.daemon.plist` | user login | you | no |
+| `launchd-system` | `/Library/LaunchDaemons/com.techpulse.system.plist` | system boot (pre-login) | `$SUDO_USER` (you) | yes |
+
+For a Mac mini with auto-login, `launchd-daemon` is enough. If the machine reboots and waits at the login screen, use `launchd-system` to have TechPulse running before anyone logs in.
 
 **System cron (if you prefer your own crontab):**
 
