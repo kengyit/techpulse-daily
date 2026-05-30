@@ -117,7 +117,7 @@
     "max_workers": 10,
 
     "llm_provider": "ollama",
-    "llm_model": "llama3.1:8b",
+    "llm_model": "gemma3:27b",
     "llm_url": "http://127.0.0.1:11434/api/generate",
     "llm_max_tokens": 512,
     "llm_retries": 3,

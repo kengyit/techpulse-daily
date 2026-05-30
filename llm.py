@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-DEFAULT_MODEL = "llama3.1:8b"
+DEFAULT_MODEL = "gemma3:27b"
 DEFAULT_URL = "http://127.0.0.1:11434/api/generate"
 
 

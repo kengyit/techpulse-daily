@@ -221,7 +221,7 @@ All are optional — env vars override the matching keys in `categories.json` �
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TECHPULSE_LLM_PROVIDER` | `ollama` | `ollama` \| `ollama-chat` \| `openai` |
-| `TECHPULSE_MODEL` | `llama3.1:8b` | Model name (any local Ollama model, or hosted model) |
+| `TECHPULSE_MODEL` | `gemma3:27b` | Model name (any local Ollama model, or hosted model) |
 | `TECHPULSE_LLM_URL` | `http://127.0.0.1:11434/api/generate` | LLM endpoint |
 | `TECHPULSE_LLM_API_KEY` | — | Bearer token for OpenAI-compatible endpoints |
 | `TECHPULSE_LLM_MAX_TOKENS` | `512` | Output token cap (raised from the old 200 to stop truncation) |
