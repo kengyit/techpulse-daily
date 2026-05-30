@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.techpulse.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__APP_DIR__/app.py</string>
+        <string>serve</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__APP_DIR__</string>
+    <!-- Start as soon as the agent loads (i.e. at login / boot). -->
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Keep it running forever: relaunch if it ever exits or crashes. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__APP_DIR__/techpulse.log</string>
+    <key>StandardErrorPath</key>
+    <string>__APP_DIR__/techpulse.log</string>
+</dict>
+</plist>

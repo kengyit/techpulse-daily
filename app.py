@@ -34,9 +34,29 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "categories.json"
+ENV_FILE = SCRIPT_DIR / ".env"
 LOG_FILE = SCRIPT_DIR / "techpulse.log"
 
 _stop = False
+
+
+def load_env_file(path: Path = ENV_FILE) -> None:
+    """Load KEY=VALUE lines from .env into the environment (without overriding).
+
+    launchd does not source .env the way the systemd units / cron.sh do, so the
+    daemon reads it here. Existing env vars win, so shell/launchd overrides hold.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.split(" #", 1)[0].strip().strip('"').strip("'")  # drop inline comments + quotes
+        if key:
+            os.environ.setdefault(key, val)
 
 
 def _handle_signal(signum, _frame):
@@ -140,6 +160,7 @@ def serve(opts: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    load_env_file()
     settings = {}
     # Peek at --config early so settings-derived defaults are correct.
     pre = argparse.ArgumentParser(add_help=False)

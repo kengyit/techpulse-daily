@@ -3,11 +3,16 @@
 #
 # Replaces the old OpenClaw cron job. Installs user-level services (no sudo):
 #
-#   ./install.sh            # auto: systemd timer on Linux, launchd on macOS
-#   ./install.sh timer      # Linux: systemd timer fires `app.py once` daily
-#   ./install.sh daemon     # Linux: systemd service runs `app.py serve` (built-in scheduler)
-#   ./install.sh launchd    # macOS: launchd agent fires `app.py once` daily
-#   ./install.sh --uninstall
+#   ./install.sh                # auto: systemd timer on Linux, launchd on macOS
+#   ./install.sh timer          # Linux: systemd timer fires `app.py once` daily
+#   ./install.sh daemon         # Linux: systemd service runs `app.py serve` (built-in scheduler)
+#   ./install.sh launchd        # macOS: launchd agent fires `app.py once` daily
+#   ./install.sh launchd-daemon # macOS: keep-alive LaunchAgent runs `app.py serve` —
+#                               #        starts at login and restarts itself
+#   sudo ./install.sh launchd-system
+#                               # macOS: keep-alive LaunchDaemon — starts at system
+#                               #        boot (pre-login). Runs as $SUDO_USER.
+#   ./install.sh --uninstall    # add `sudo` to also remove the LaunchDaemon
 #
 # Schedule time comes from $TECHPULSE_SCHEDULE, else categories.json
 # settings.schedule_time, else 06:30.
@@ -17,6 +22,10 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="$(command -v python3 || command -v python)"
 TEMPLATES="${APP_DIR}/service"
+# User the daemon should run as. When invoked via `sudo`, $SUDO_USER is set to
+# the original invoker so the LaunchDaemon doesn't end up running as root.
+INSTALL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+SYS_PLIST="/Library/LaunchDaemons/com.techpulse.system.plist"
 
 if [ -z "${PYTHON}" ]; then
     echo "ERROR: python3 not found on PATH." >&2
@@ -48,6 +57,7 @@ render() {  # render <template> <dest>
         -e "s|__ON_CALENDAR__|${ON_CALENDAR}|g" \
         -e "s|__HOUR__|${HOUR}|g" \
         -e "s|__MINUTE__|${MINUTE}|g" \
+        -e "s|__USER__|${INSTALL_USER}|g" \
         "$1" >"$2"
 }
 
@@ -64,10 +74,25 @@ fi
 uninstall() {
     case "${OS}" in
         Darwin)
-            local plist="${HOME}/Library/LaunchAgents/com.techpulse.daily.plist"
-            launchctl unload -w "${plist}" 2>/dev/null || true
-            rm -f "${plist}"
-            echo "Removed launchd agent."
+            local plist
+            for label in com.techpulse.daily com.techpulse.daemon; do
+                plist="${HOME}/Library/LaunchAgents/${label}.plist"
+                launchctl unload -w "${plist}" 2>/dev/null || true
+                rm -f "${plist}"
+            done
+            if [ -f "${SYS_PLIST}" ]; then
+                if [ "$(id -u)" -eq 0 ]; then
+                    launchctl unload -w "${SYS_PLIST}" 2>/dev/null || true
+                    rm -f "${SYS_PLIST}"
+                    echo "Removed LaunchAgents and LaunchDaemon."
+                else
+                    echo "Removed user LaunchAgents."
+                    echo "Note: a LaunchDaemon is still installed at ${SYS_PLIST}."
+                    echo "      Re-run as root to remove it: sudo ./install.sh --uninstall"
+                fi
+            else
+                echo "Removed launchd agents."
+            fi
             ;;
         *)
             systemctl --user disable --now techpulse.timer 2>/dev/null || true
@@ -122,8 +147,45 @@ case "${MODE}" in
         echo "  Status:  launchctl list | grep com.techpulse.daily"
         echo "  Run now: launchctl start com.techpulse.daily"
         ;;
+    launchd-daemon)
+        AGENT_DIR="${HOME}/Library/LaunchAgents"
+        PLIST="${AGENT_DIR}/com.techpulse.daemon.plist"
+        mkdir -p "${AGENT_DIR}"
+        render "${TEMPLATES}/com.techpulse.daemon.plist" "${PLIST}"
+        launchctl unload -w "${PLIST}" 2>/dev/null || true
+        launchctl load -w "${PLIST}"
+        echo "Installed LaunchAgent — starts at login, restarts itself, runs daily at ${SCHEDULE}."
+        echo "  Status: launchctl list | grep com.techpulse.daemon"
+        echo "  Logs:   tail -f ${APP_DIR}/techpulse.log"
+        echo "  Note: a LaunchAgent starts at login. For pre-login start at system boot,"
+        echo "        install the LaunchDaemon: sudo ./install.sh launchd-system"
+        ;;
+    launchd-system)
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "ERROR: 'launchd-system' installs a LaunchDaemon in /Library/LaunchDaemons" >&2
+            echo "       and requires root. Re-run with: sudo ./install.sh launchd-system" >&2
+            exit 1
+        fi
+        if [ -z "${SUDO_USER:-}" ] || [ "${INSTALL_USER}" = "root" ]; then
+            echo "WARNING: SUDO_USER not set; the daemon would run as root." >&2
+            echo "         Re-run via 'sudo ./install.sh launchd-system' (not 'sudo -i')" >&2
+            echo "         so the daemon runs as your normal user account." >&2
+            exit 1
+        fi
+        render "${TEMPLATES}/com.techpulse.system.plist" "${SYS_PLIST}"
+        chown root:wheel "${SYS_PLIST}"
+        chmod 644 "${SYS_PLIST}"
+        launchctl unload -w "${SYS_PLIST}" 2>/dev/null || true
+        launchctl load -w "${SYS_PLIST}"
+        echo "Installed LaunchDaemon — starts at system boot (pre-login), restarts itself."
+        echo "  Runs as:  ${INSTALL_USER}"
+        echo "  Schedule: daily at ${SCHEDULE} (via the built-in scheduler)"
+        echo "  Status:   sudo launchctl list | grep com.techpulse.system"
+        echo "  Logs:     tail -f ${APP_DIR}/techpulse.log"
+        echo "  Uninstall: sudo ./install.sh --uninstall"
+        ;;
     *)
-        echo "ERROR: unknown mode '${MODE}'. Use: timer | daemon | launchd | --uninstall" >&2
+        echo "ERROR: unknown mode '${MODE}'. Use: timer | daemon | launchd | launchd-daemon | launchd-system | --uninstall" >&2
         exit 1
         ;;
 esac
